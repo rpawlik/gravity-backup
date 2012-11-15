@@ -19,6 +19,8 @@ backupdir="/backup"
 mins="300"
 #Topics to backup for chef
 topics="node environment client role cookbook" # "client role cookbook"
+#dsh group name for the compute nodes
+groupname="compute"
 ################################################################
 #Author: rpawlik@rackspace.com
 
@@ -35,6 +37,9 @@ OPTIONS:
 -v Backs up the VM image and XML file.
 -f Backs up the actual Chef and couchdb files.
 -d Dumps the Chef configs to JSON and downloads all cookbooks.
+-r Restores raw file backup
+-R Restores controller node from Chef JSON dumps
+-C Restore compute node from Chef JSON dumps
 -c Compact couchdb database
 -q Quiet
 
@@ -49,8 +54,10 @@ FILEBACK=
 CHEFDUMP=
 QUIET=
 COUCHDB=
+RESTOREFILE=
+RESTOREDUMP=
 
-while getopts "havfdcq" OPTION
+while getopts "havfdrRcq" OPTION
 do
         case $OPTION in
                 h)
@@ -69,6 +76,12 @@ do
                 d)
                   CHEFDUMP="1"
                  ;;
+                r)
+                  RESTOREFILE="1"
+                 ;;
+                R)
+                  RESTOREDUMP="1"
+                 ;;
 		c)
 		  COUCHDB="1"
 		 ;;
@@ -79,7 +92,7 @@ do
         esac
 done
 
-if [ -z $FULL ] && [ -z $VMBACK ] && [ -z $FILEBACK ] && [ -z $CHEFDUMP ] && [ -z $COUCHDB ]
+if [ -z $FULL ] && [ -z $VMBACK ] && [ -z $FILEBACK ] && [ -z $CHEFDUMP ] && [ -z $COUCHDB ] && [ -z $RESTOREFILE ] && [ -z $RESTOREDUMP ]
 then
   echo "Please specify a valid option!"
   usage
@@ -115,6 +128,18 @@ then
     mkdir $backupdir
   fi
 fi
+
+
+chefdown ()
+{
+ssh rack@$chefip 'sudo service chef-server stop; sudo service couchdb stop; sudo service chef-expander stop; sudo service chef-client stop; sudo service chef-server-webui stop; sudo service chef-solr stop' >/dev/null
+}
+
+
+chefup ()
+{
+ssh rack@$chefip 'sudo service chef-server start; sudo service couchdb start; sudo service chef-expander start; sudo service chef-client start; sudo service chef-server-webui start; sudo service chef-solr start' >/dev/null
+}
 
 #backup chef VM
 
@@ -193,7 +218,7 @@ then
   then
     compactdb
     printext "Shutting down chef-server and couchdb."
-    ssh rack@$chefip 'sudo service chef-server stop; sudo service couchdb stop; sudo service chef-expander stop; sudo service chef-client stop; sudo service chef-server-webui stop; sudo service chef-solr stop' >/dev/null 
+    chefdown
     printext "Removing old Chef backup (if it exists)."
     ssh rack@$chefip "rm -rf /home/rack/chef-backup-*"
     rm -rf $backupdir/"chef-backup-*"
@@ -204,7 +229,7 @@ then
     printext "Removing temporary backup file."
     ssh -q rack@$chefip "rm -rf /home/rack/chef-backup-*"
     printext "Starting chef-server and couchdb."
-    ssh rack@$chefip 'sudo service chef-server start; sudo service couchdb start; sudo service chef-expander start; sudo service chef-client start; sudo service chef-server-webui start; sudo service chef-solr start' >/dev/null
+    chefup
     printext "Chef file and couchdb backup complete! Find it here: `ls $backupdir'/chef-backup-'*`"
   else
     echo "Chef file backup newer than $mins minutes, skipping."
@@ -267,3 +292,42 @@ then
   compactdb
 fi  
 
+#Restore file backup
+
+if [ "$RESTOREFILE" = "1" ]
+then
+  printext "Shutting down chef-server and couchdb."
+  chefdown
+  printtext "Copying backup to $chefvm."
+  scp -q $backupdir/chef-backup-*  rack@$chefip:/home/rack/ 
+  printext "Extracting files."
+  ssh rack@$chefip 'sudo tar zxPf /home/rack/chef-backup-*'
+  printext "Moving files in place."
+  ssh rack@$chefip 'sudo cp -R /home/rack/etc/couchdb /etc/couchdb'
+  ssh rack@$chefip 'sudo cp -R /home/rack/var/lib/chef /var/lib/chef'
+  ssh rack@$chefip 'sudo cp -R /home/rack/var/lib/couchdb /var/lib/couchdb'
+  ssh rack@$chefip 'sudo cp -R /home/rack/var/cache/chef /var/cache/chef'
+  ssh rack@$chefip 'sudo cp -R /home/rack/var/log/chef /var/log/chef'
+  ssh rack@$chefip 'sudo cp -R /home/rack/var/log/couchdb /var/log/couchdb'
+  ssh rack@$chefip 'sudo cp -R /home/rack/etc/chef /etc/chef'
+  printext "Files have been copied, starting Chef."
+  chefup
+  printext "Restore complete. Please verify success."
+fi
+
+#restore infra node from JSON dumps
+
+if [ "$RESTOREDUMP" = "1" ]
+then
+  printext "Restoring Chef details from JSON dump."
+  for n in $(ls $backupdir/{node,environment}/*.js | 
+    grep -v '_default.js$'); do
+    knife $(basename $(dirname "${n}")) from file "${n}"
+  done
+  if which dsh >/dev/null
+  then
+    dsh -Mcg $groupname "rm -rf /etc/chef/client.pem"
+  else
+    printext "dsh not found, please remove /etc/chef/client.pem manually from each compute node"  
+  printext "Restore complete. Please restore the MySQL database for the controller and restart MySQL before running chef-client. Not doing this could result in data loss."
+fi
