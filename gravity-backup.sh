@@ -39,7 +39,6 @@ OPTIONS:
 -d Dumps the Chef configs to JSON and downloads all cookbooks.
 -r Restores raw file backup
 -R Restores controller node from Chef JSON dumps
--C Restore compute node from Chef JSON dumps
 -c Compact couchdb database
 -q Quiet
 
@@ -112,7 +111,7 @@ fi
 compactdb ()
 {
 printext "Compacting couchdb database."
-if !  ssh rack@$chefip "which curl"
+if !  ssh -q rack@$chefip "which curl" >/dev/null
 then
   ssh rack@$chefip "sudo apt-get update && sudo apt-get install -y curl" >/dev/null
 fi
