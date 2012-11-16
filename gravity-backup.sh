@@ -301,18 +301,10 @@ if [ "$RESTOREFILE" = "1" ]
 then
   printext "Shutting down chef-server and couchdb."
   chefdown
-  printtext "Copying backup to $chefvm."
+  printext "Copying backup to $chefvm."
   scp -q $backupdir/chef-backup-*  rack@$chefip:/home/rack/ 
-  printext "Extracting files."
+  printext "Extracting files and moving into place."
   ssh rack@$chefip 'sudo tar zxPf /home/rack/chef-backup-*'
-  printext "Moving files in place."
-  ssh rack@$chefip 'sudo cp -R /home/rack/etc/couchdb /etc/couchdb'
-  ssh rack@$chefip 'sudo cp -R /home/rack/var/lib/chef /var/lib/chef'
-  ssh rack@$chefip 'sudo cp -R /home/rack/var/lib/couchdb /var/lib/couchdb'
-  ssh rack@$chefip 'sudo cp -R /home/rack/var/cache/chef /var/cache/chef'
-  ssh rack@$chefip 'sudo cp -R /home/rack/var/log/chef /var/log/chef'
-  ssh rack@$chefip 'sudo cp -R /home/rack/var/log/couchdb /var/log/couchdb'
-  ssh rack@$chefip 'sudo cp -R /home/rack/etc/chef /etc/chef'
   printext "Files have been copied, starting Chef."
   chefup
   printext "Restore complete. Please verify success."
@@ -323,10 +315,20 @@ fi
 if [ "$RESTOREDUMP" = "1" ]
 then
   printext "Restoring Chef details from JSON dump."
-  for n in $(ls $backupdir/{node,environment}/*.js | 
-    grep -v '_default.js$'); do
-    knife $(basename $(dirname "${n}")) from file "${n}"
+  for file in $(ls $backupdir | egrep chef-dump)
+  do
+    tar zxPf $backupdir/$file
   done
+    for compute in $(ls $backupdir/node/ | sed 's/.json//g')
+  do
+    knife node delete -y $compute > /dev/null 2>&1
+    knife client delete -y $compute > /dev/null 2>&1
+  done
+  for n in $(ls $backupdir/{node,environment}/*.json | 
+    grep -v '_default.json$'); do
+    knife $(basename $(dirname "${n}")) from file "${n}" >/dev/null
+  done
+  knife cookbook upload -a -o $backupdir/cookbook >/dev/null
   if which dsh >/dev/null
   then
     dsh -Mcg $groupname "rm -rf /etc/chef/client.pem"
