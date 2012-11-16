@@ -112,6 +112,10 @@ fi
 compactdb ()
 {
 printext "Compacting couchdb database."
+if !  ssh rack@$chefip "which curl"
+then
+  ssh rack@$chefip "sudo apt-get update && sudo apt-get install -y curl" >/dev/null
+fi
 ssh -q rack@$chefip 'curl -S -s  -H "Content-Type: application/json" -X POST http://localhost:5984/chef/_compact' >/dev/null
  
 while ssh  rack@$chefip "curl -S -s http://localhost:5984/chef" | grep '"compact_running":true' >/dev/null
@@ -328,6 +332,7 @@ then
   then
     dsh -Mcg $groupname "rm -rf /etc/chef/client.pem"
   else
-    printext "dsh not found, please remove /etc/chef/client.pem manually from each compute node"  
+    printext "dsh not found, please remove /etc/chef/client.pem manually from each compute node."  
+  fi
   printext "Restore complete. Please restore the MySQL database for the controller and restart MySQL before running chef-client. Not doing this could result in data loss."
 fi
