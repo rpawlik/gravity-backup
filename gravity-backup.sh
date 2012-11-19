@@ -34,9 +34,9 @@ This script backs up the Rackspace Chef server VM for Openstack deployments usin
 OPTIONS:
 -h Show this message
 -a Does every backup method.
--v Backs up the VM image and XML file.
--f Backs up the actual Chef and couchdb files.
--d Dumps the Chef configs to JSON and downloads all cookbooks.
+-v Backs up Chef VM image and XML file.
+-f Backs up  actual Chef and couchdb files.
+-d Dumps Chef configs to JSON.
 -r Restores raw file backup
 -R Restores controller node from Chef JSON dumps
 -c Compact couchdb database
@@ -155,9 +155,9 @@ then
   stats=0
   if [ "$buexist" = "$filetyme" ] 
   then
-    if ps auwx | grep $chefvm | grep -v grep | awk {'print $21'} | grep $chefvm >/dev/null
+    if ps auwx | grep $chefvm | grep -v grep  >/dev/null
     then
-      while ps auwx | grep $chefvm | grep -v grep | awk {'print $21'} | grep $chefvm >/dev/null
+      while ps auwx | grep $chefvm | grep -v grep  >/dev/null
       do
         printext "Shutting down $chefvm VM."
         stats=$[ $stats + 1 ]
@@ -263,12 +263,7 @@ then
         printext "Dumping $topic data."
         for item in $(knife $topic list | awk {'print $1'}) 
         do
-          if [ "$topic" != "cookbook" ] 
-          then
-            knife $topic show $flag $item > $outdir/$item.json
-          else
-            knife cookbook download $item -N --force -d $outdir >/dev/null
-          fi
+          knife $topic show $flag $item > $outdir/$item.js
         done
       done
       printext "Archiving and compressing data."
@@ -319,21 +314,26 @@ then
   do
     tar zxPf $backupdir/$file
   done
-    for compute in $(ls $backupdir/node/ | sed 's/.json//g')
+    for compute in $(ls $backupdir/node/ | sed 's/.js//g')
   do
     knife node delete -y $compute > /dev/null 2>&1
     knife client delete -y $compute > /dev/null 2>&1
   done
-  for n in $(ls $backupdir/{node,environment}/*.json | 
-    grep -v '_default.json$'); do
+  for n in $(ls $backupdir/{node,environment}/*.js | 
+    grep -v '_default.js$'); do
     knife $(basename $(dirname "${n}")) from file "${n}" >/dev/null
   done
-  knife cookbook upload -a -o $backupdir/cookbook >/dev/null
   if which dsh >/dev/null
   then
-    dsh -Mcg $groupname "rm -rf /etc/chef/client.pem"
+    dsh -Mcg $groupname "rm -rf /etc/chef/client.pem; rm -rf /etc/chef/validation.pem"
+    rm -rf /etc/chef/client.pem; rm -rf /etc/chef/validation.pem
+#FIX ME
+#    echo "Enter rack Chef VM password:"
+#    ssh-copy-id rack@169.254.123.2
+#    curl -L http://opscode.com/chef/install.sh | bash > /dev/null 2>&1
+#    for i in $(cat /root/.dsh/group/$groupname)
   else
-    printext "dsh not found, please remove /etc/chef/client.pem manually from each compute node."  
+    printext "dsh not found, please remove /etc/chef/client.pem and /etc/chef/validation.pem manually from each  node, then copy /etc/chef/validation.pem from the Chef server VM to all nodes."  
   fi
-  printext "Restore complete. Please restore the MySQL database for the controller and restart MySQL before running chef-client. Not doing this could result in data loss."
+  printext "Restore complete. Upload Chef cookbooks (using knife) from https://github.com/rcbops/chef-cookbooks.  Restore the MySQL database for the controller and restart MySQL before running chef-client. Not doing this could result in data loss. Finally, run chef-client on infra node and any additional nodes."
 fi
